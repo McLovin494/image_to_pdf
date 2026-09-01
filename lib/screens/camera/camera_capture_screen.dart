@@ -1,7 +1,9 @@
 import 'dart:io';
 
 import 'package:camera/camera.dart';
+import 'package:document_scan/document_scan.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../arrange/arrange_pages_screen.dart';
@@ -17,6 +19,8 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
     with WidgetsBindingObserver {
   CameraController? _controller;
 
+  final DocumentScanner _documentScanner = DocumentScanner();
+
   List<CameraDescription> _cameras = [];
 
   final List<XFile> capturedImages = [];
@@ -30,8 +34,8 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
 
   int selectedCameraIndex = 0;
 
-  // Tap-to-focus indicator.
   Offset? focusPoint;
+
   bool showFocusIndicator = false;
 
   int _focusRequestId = 0;
@@ -109,8 +113,6 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
 
     if (!mounted) return;
 
-    // Prevent an older tap from hiding
-    // a newer focus indicator.
     if (requestId != _focusRequestId) {
       return;
     }
@@ -162,13 +164,12 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
       try {
         await controller.setFlashMode(flashMode);
       } on CameraException {
-        // Some cameras/devices may not support
-        // the requested flash mode.
         flashMode = FlashMode.off;
       }
 
       if (!mounted) {
         await controller.dispose();
+
         return;
       }
 
@@ -180,6 +181,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
 
       setState(() {
         isInitializing = false;
+
         errorMessage = _getCameraErrorMessage(e);
       });
     } catch (e) {
@@ -187,6 +189,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
 
       setState(() {
         isInitializing = false;
+
         errorMessage = 'Failed to start camera: $e';
       });
     }
@@ -208,6 +211,38 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
     }
   }
 
+  Future<XFile?> _scanDocument(XFile originalImage) async {
+    try {
+      final scannedDocument = await _documentScanner.scan(
+        ScanInput.file(originalImage.path),
+        filter: ScanFilter.enhance,
+        output: const ScanOutputFormat.jpegAt(95),
+        background: true,
+      );
+
+      // No document-like rectangle found.
+      if (scannedDocument == null) {
+        return null;
+      }
+
+      final temporaryDirectory = await getTemporaryDirectory();
+
+      final outputFile = File(
+        '${temporaryDirectory.path}'
+        '${Platform.pathSeparator}'
+        'scan_${DateTime.now().microsecondsSinceEpoch}.jpg',
+      );
+
+      await outputFile.writeAsBytes(scannedDocument.bytes, flush: true);
+
+      return XFile(outputFile.path);
+    } catch (e) {
+      debugPrint('Document scan failed: $e');
+
+      return null;
+    }
+  }
+
   Future<void> _captureImage() async {
     final controller = _controller;
 
@@ -220,13 +255,42 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
         isCapturing = true;
       });
 
-      final image = await controller.takePicture();
+      // 1. Capture full camera image.
+      final originalImage = await controller.takePicture();
+
+      // 2. Detect the document and
+      // perspective-correct it.
+      final scannedImage = await _scanDocument(originalImage);
 
       if (!mounted) return;
 
+      if (scannedImage != null) {
+        // Detection succeeded.
+        setState(() {
+          capturedImages.add(scannedImage);
+        });
+
+        return;
+      }
+
+      // Detection failed.
+      //
+      // We deliberately keep the original
+      // photo instead of throwing the page
+      // away. The user can still crop it
+      // manually in Arrange Pages.
       setState(() {
-        capturedImages.add(image);
+        capturedImages.add(originalImage);
       });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not detect the document automatically. Original image kept.',
+          ),
+          duration: Duration(seconds: 2),
+        ),
+      );
     } on CameraException catch (e) {
       if (!mounted) return;
 
@@ -418,7 +482,10 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
               child: _CameraPreview(controller: controller),
             ),
 
-            // Document scanner guide.
+            // Visual document guide.
+            //
+            // Actual document detection happens
+            // after capture.
             IgnorePointer(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(28, 74, 28, 72),
@@ -429,7 +496,6 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
               ),
             ),
 
-            // Visible tap-to-focus indicator.
             if (showFocusIndicator && focusPoint != null)
               Positioned(
                 left: focusPoint!.dx - 30,
@@ -443,7 +509,6 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
                 ),
               ),
 
-            // Camera controls.
             Positioned(
               top: 16,
               left: 0,
@@ -469,7 +534,6 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
               ),
             ),
 
-            // Camera hint / page counter.
             Positioned(
               left: 20,
               right: 20,
@@ -485,7 +549,9 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
-                    capturedImages.isEmpty
+                    isCapturing
+                        ? 'Processing document...'
+                        : capturedImages.isEmpty
                         ? 'Position the page inside the frame'
                         : '${capturedImages.length} page${capturedImages.length == 1 ? '' : 's'} captured',
                     style: const TextStyle(
@@ -534,7 +600,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
             width: 64,
             child: capturedImages.isNotEmpty
                 ? IconButton(
-                    onPressed: _continue,
+                    onPressed: isCapturing ? null : _continue,
                     icon: const Icon(
                       Icons.arrow_forward_rounded,
                       color: Colors.white,
@@ -771,12 +837,12 @@ class _DocumentFramePainter extends CustomPainter {
 
     const cornerLength = 34.0;
 
-    // Top-left.
+    // Top-left
     canvas.drawLine(const Offset(0, 0), const Offset(cornerLength, 0), paint);
 
     canvas.drawLine(const Offset(0, 0), const Offset(0, cornerLength), paint);
 
-    // Top-right.
+    // Top-right
     canvas.drawLine(
       Offset(size.width, 0),
       Offset(size.width - cornerLength, 0),
@@ -789,7 +855,7 @@ class _DocumentFramePainter extends CustomPainter {
       paint,
     );
 
-    // Bottom-left.
+    // Bottom-left
     canvas.drawLine(
       Offset(0, size.height),
       Offset(cornerLength, size.height),
@@ -802,7 +868,7 @@ class _DocumentFramePainter extends CustomPainter {
       paint,
     );
 
-    // Bottom-right.
+    // Bottom-right
     canvas.drawLine(
       Offset(size.width, size.height),
       Offset(size.width - cornerLength, size.height),

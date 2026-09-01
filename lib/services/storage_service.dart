@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 
 class StorageService {
@@ -46,8 +47,11 @@ class StorageService {
     if (safeName.isEmpty) {
       safeName = 'Document';
     }
+
     var newFile = File(
-      '${directory.path}${Platform.pathSeparator}$safeName.pdf',
+      '${directory.path}'
+      '${Platform.pathSeparator}'
+      '$safeName.pdf',
     );
 
     if (newFile.path == file.path) {
@@ -73,5 +77,26 @@ class StorageService {
     if (await file.exists()) {
       await file.delete();
     }
+  }
+
+  Future<Uri?> exportPdf(File file) async {
+    if (!await file.exists()) {
+      throw Exception('PDF file does not exist.');
+    }
+
+    final fileName = file.path.split(Platform.pathSeparator).last;
+
+    final bytes = await file.readAsBytes();
+
+    final savedUri = await FilePicker.saveFile(
+      dialogTitle: 'Save PDF',
+      fileName: fileName,
+      bytes: bytes,
+      mimeType: 'application/pdf',
+      type: FileType.custom,
+      allowedExtensions: const ['pdf'],
+    );
+
+    return savedUri;
   }
 }

@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-
 import 'package:image_to_pdf/screens/create_pdf/pdf_success_screen.dart';
 import 'package:image_to_pdf/services/pdf_service.dart';
 
 import '../../core/theme/app_colors.dart';
+import '../../services/settings_service.dart';
 
 enum PdfPageSize { a4, letter, fitImage }
 
@@ -27,14 +27,77 @@ class _PdfSettingsScreenState extends State<PdfSettingsScreen> {
   );
 
   final PdfService pdfService = PdfService();
+  final SettingsService settingsService = SettingsService();
 
   bool isCreating = false;
+  bool isLoadingDefaults = true;
 
   PdfPageSize pageSize = PdfPageSize.a4;
   PdfOrientation orientation = PdfOrientation.portrait;
   PdfMargin margin = PdfMargin.small;
-
   double imageQuality = 85;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDefaults();
+  }
+
+  Future<void> _loadDefaults() async {
+    try {
+      final savedPageSize = await settingsService.getPageSize();
+      final savedMargin = await settingsService.getMargin();
+      final savedQuality = await settingsService.getImageQuality();
+
+      if (!mounted) return;
+
+      setState(() {
+        pageSize = _mapPageSize(savedPageSize);
+        margin = _mapMargin(savedMargin);
+        imageQuality = savedQuality.clamp(40, 100).toDouble();
+        isLoadingDefaults = false;
+      });
+    } catch (e) {
+      debugPrint('Failed to load PDF defaults: $e');
+
+      if (!mounted) return;
+
+      setState(() {
+        isLoadingDefaults = false;
+      });
+    }
+  }
+
+  PdfPageSize _mapPageSize(String value) {
+    switch (value) {
+      case 'Letter':
+        return PdfPageSize.letter;
+
+      case 'Fit Image':
+        return PdfPageSize.fitImage;
+
+      case 'A4':
+      default:
+        return PdfPageSize.a4;
+    }
+  }
+
+  PdfMargin _mapMargin(String value) {
+    switch (value) {
+      case 'None':
+        return PdfMargin.none;
+
+      case 'Medium':
+        return PdfMargin.medium;
+
+      case 'Large':
+        return PdfMargin.large;
+
+      case 'Small':
+      default:
+        return PdfMargin.small;
+    }
+  }
 
   @override
   void dispose() {
@@ -92,6 +155,8 @@ class _PdfSettingsScreenState extends State<PdfSettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bool isFitImage = pageSize == PdfPageSize.fitImage;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text(
@@ -100,198 +165,274 @@ class _PdfSettingsScreenState extends State<PdfSettingsScreen> {
         ),
       ),
       body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _DocumentSummary(pageCount: widget.images.length),
+        child: isLoadingDefaults
+            ? const Center(
+                child: CircularProgressIndicator(color: AppColors.primary),
+              )
+            : Column(
+                children: [
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _DocumentSummary(pageCount: widget.images.length),
 
-                    const SizedBox(height: 28),
+                          const SizedBox(height: 28),
 
-                    const _SectionTitle(title: 'FILE NAME'),
+                          const _SectionTitle(title: 'FILE NAME'),
 
-                    const SizedBox(height: 10),
+                          const SizedBox(height: 10),
 
-                    TextField(
-                      controller: fileNameController,
-                      decoration: const InputDecoration(
-                        hintText: 'Enter PDF name',
-                        prefixIcon: Icon(Icons.picture_as_pdf_outlined),
-                        suffixText: '.pdf',
-                      ),
-                    ),
+                          TextField(
+                            controller: fileNameController,
+                            decoration: const InputDecoration(
+                              hintText: 'Enter PDF name',
+                              prefixIcon: Icon(Icons.picture_as_pdf_outlined),
+                              suffixText: '.pdf',
+                            ),
+                          ),
 
-                    const SizedBox(height: 28),
+                          const SizedBox(height: 28),
 
-                    const _SectionTitle(title: 'PAGE SIZE'),
+                          const _SectionTitle(title: 'PAGE SIZE'),
 
-                    const SizedBox(height: 10),
+                          const SizedBox(height: 10),
 
-                    _OptionCard<PdfPageSize>(
-                      value: pageSize,
-                      options: const [
-                        _Option(
-                          value: PdfPageSize.a4,
-                          title: 'A4',
-                          subtitle: '210 × 297 mm',
-                        ),
-                        _Option(
-                          value: PdfPageSize.letter,
-                          title: 'Letter',
-                          subtitle: '8.5 × 11 in',
-                        ),
-                        _Option(
-                          value: PdfPageSize.fitImage,
-                          title: 'Fit to image',
-                          subtitle: 'Match each image size',
-                        ),
-                      ],
-                      onChanged: (value) {
-                        setState(() {
-                          pageSize = value;
-                        });
-                      },
-                    ),
-
-                    const SizedBox(height: 28),
-
-                    const _SectionTitle(title: 'ORIENTATION'),
-
-                    const SizedBox(height: 10),
-
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _SelectableTile(
-                            icon: Icons.crop_portrait_rounded,
-                            title: 'Portrait',
-                            selected: orientation == PdfOrientation.portrait,
-                            onTap: () {
+                          _OptionCard<PdfPageSize>(
+                            value: pageSize,
+                            options: const [
+                              _Option(
+                                value: PdfPageSize.a4,
+                                title: 'A4',
+                                subtitle: '210 × 297 mm',
+                              ),
+                              _Option(
+                                value: PdfPageSize.letter,
+                                title: 'Letter',
+                                subtitle: '8.5 × 11 in',
+                              ),
+                              _Option(
+                                value: PdfPageSize.fitImage,
+                                title: 'Fit to image',
+                                subtitle: 'Match each image size',
+                              ),
+                            ],
+                            onChanged: (value) {
                               setState(() {
-                                orientation = PdfOrientation.portrait;
+                                pageSize = value;
                               });
                             },
                           ),
-                        ),
 
-                        const SizedBox(width: 12),
+                          const SizedBox(height: 28),
 
-                        Expanded(
-                          child: _SelectableTile(
-                            icon: Icons.crop_landscape_rounded,
-                            title: 'Landscape',
-                            selected: orientation == PdfOrientation.landscape,
-                            onTap: () {
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const _SectionTitle(title: 'ORIENTATION'),
+
+                              if (isFitImage)
+                                const Text(
+                                  'Automatic',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.primary,
+                                  ),
+                                ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 10),
+
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _SelectableTile(
+                                  icon: Icons.crop_portrait_rounded,
+                                  title: 'Portrait',
+                                  selected:
+                                      !isFitImage &&
+                                      orientation == PdfOrientation.portrait,
+                                  enabled: !isFitImage,
+                                  onTap: isFitImage
+                                      ? null
+                                      : () {
+                                          setState(() {
+                                            orientation =
+                                                PdfOrientation.portrait;
+                                          });
+                                        },
+                                ),
+                              ),
+
+                              const SizedBox(width: 12),
+
+                              Expanded(
+                                child: _SelectableTile(
+                                  icon: Icons.crop_landscape_rounded,
+                                  title: 'Landscape',
+                                  selected:
+                                      !isFitImage &&
+                                      orientation == PdfOrientation.landscape,
+                                  enabled: !isFitImage,
+                                  onTap: isFitImage
+                                      ? null
+                                      : () {
+                                          setState(() {
+                                            orientation =
+                                                PdfOrientation.landscape;
+                                          });
+                                        },
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          if (isFitImage) ...[
+                            const SizedBox(height: 10),
+
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppColors.primary.withValues(
+                                  alpha: 0.07,
+                                ),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(
+                                    Icons.info_outline_rounded,
+                                    size: 18,
+                                    color: AppColors.primary,
+                                  ),
+
+                                  SizedBox(width: 8),
+
+                                  Expanded(
+                                    child: Text(
+                                      'Orientation is determined by each image when using Fit to image.',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        height: 1.4,
+                                        color: AppColors.textSecondary,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+
+                          const SizedBox(height: 28),
+
+                          const _SectionTitle(title: 'PAGE MARGIN'),
+
+                          const SizedBox(height: 10),
+
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              _MarginChip(
+                                label: 'None',
+                                selected: margin == PdfMargin.none,
+                                onTap: () {
+                                  setState(() {
+                                    margin = PdfMargin.none;
+                                  });
+                                },
+                              ),
+
+                              _MarginChip(
+                                label: 'Small',
+                                selected: margin == PdfMargin.small,
+                                onTap: () {
+                                  setState(() {
+                                    margin = PdfMargin.small;
+                                  });
+                                },
+                              ),
+
+                              _MarginChip(
+                                label: 'Medium',
+                                selected: margin == PdfMargin.medium,
+                                onTap: () {
+                                  setState(() {
+                                    margin = PdfMargin.medium;
+                                  });
+                                },
+                              ),
+
+                              _MarginChip(
+                                label: 'Large',
+                                selected: margin == PdfMargin.large,
+                                onTap: () {
+                                  setState(() {
+                                    margin = PdfMargin.large;
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 28),
+
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const _SectionTitle(title: 'IMAGE QUALITY'),
+
+                              Text(
+                                '${imageQuality.round()}%',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          Slider(
+                            value: imageQuality,
+                            min: 40,
+                            max: 100,
+                            divisions: 6,
+                            onChanged: (value) {
                               setState(() {
-                                orientation = PdfOrientation.landscape;
+                                imageQuality = value;
                               });
                             },
                           ),
-                        ),
-                      ],
-                    ),
 
-                    const SizedBox(height: 28),
-
-                    const _SectionTitle(title: 'PAGE MARGIN'),
-
-                    const SizedBox(height: 10),
-
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        _MarginChip(
-                          label: 'None',
-                          selected: margin == PdfMargin.none,
-                          onTap: () {
-                            setState(() {
-                              margin = PdfMargin.none;
-                            });
-                          },
-                        ),
-                        _MarginChip(
-                          label: 'Small',
-                          selected: margin == PdfMargin.small,
-                          onTap: () {
-                            setState(() {
-                              margin = PdfMargin.small;
-                            });
-                          },
-                        ),
-                        _MarginChip(
-                          label: 'Medium',
-                          selected: margin == PdfMargin.medium,
-                          onTap: () {
-                            setState(() {
-                              margin = PdfMargin.medium;
-                            });
-                          },
-                        ),
-                        _MarginChip(
-                          label: 'Large',
-                          selected: margin == PdfMargin.large,
-                          onTap: () {
-                            setState(() {
-                              margin = PdfMargin.large;
-                            });
-                          },
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 28),
-
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const _SectionTitle(title: 'IMAGE QUALITY'),
-                        Text(
-                          '${imageQuality.round()}%',
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.primary,
+                          const Text(
+                            'Higher quality produces a larger PDF file.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: AppColors.textSecondary,
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-
-                    Slider(
-                      value: imageQuality,
-                      min: 40,
-                      max: 100,
-                      divisions: 6,
-                      onChanged: (value) {
-                        setState(() {
-                          imageQuality = value;
-                        });
-                      },
-                    ),
-
-                    const Text(
-                      'Higher quality produces a larger PDF file.',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: AppColors.textSecondary,
+                        ],
                       ),
                     ),
-                  ],
-                ),
+                  ),
+
+                  _BottomCreateButton(
+                    pageCount: widget.images.length,
+                    isLoading: isCreating,
+                    onPressed: isCreating ? null : _createPdf,
+                  ),
+                ],
               ),
-            ),
-
-            _BottomCreateButton(
-              pageCount: widget.images.length,
-              isLoading: isCreating,
-              onPressed: isCreating ? null : _createPdf,
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -450,52 +591,57 @@ class _SelectableTile extends StatelessWidget {
   final IconData icon;
   final String title;
   final bool selected;
-  final VoidCallback onTap;
+  final bool enabled;
+  final VoidCallback? onTap;
 
   const _SelectableTile({
     required this.icon,
     required this.title,
     required this.selected,
+    required this.enabled,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        height: 94,
-        decoration: BoxDecoration(
-          color: selected
-              ? AppColors.primary.withValues(alpha: 0.08)
-              : Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: selected ? AppColors.primary : AppColors.border,
-            width: selected ? 1.5 : 1,
+    return Opacity(
+      opacity: enabled ? 1 : 0.45,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(14),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          height: 94,
+          decoration: BoxDecoration(
+            color: selected
+                ? AppColors.primary.withValues(alpha: 0.08)
+                : Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: selected ? AppColors.primary : AppColors.border,
+              width: selected ? 1.5 : 1,
+            ),
           ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              icon,
-              color: selected ? AppColors.primary : AppColors.textSecondary,
-            ),
-
-            const SizedBox(height: 8),
-
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: selected ? AppColors.primary : AppColors.textPrimary,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                color: selected ? AppColors.primary : AppColors.textSecondary,
               ),
-            ),
-          ],
+
+              const SizedBox(height: 8),
+
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: selected ? AppColors.primary : AppColors.textPrimary,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

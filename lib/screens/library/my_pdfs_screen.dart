@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_colors.dart';
+import '../../services/share_service.dart';
 import '../../services/storage_service.dart';
 import '../pdf_viewer/pdf_viewer_screen.dart';
 
@@ -16,15 +17,95 @@ class MyPdfsScreen extends StatefulWidget {
 class _MyPdfsScreenState extends State<MyPdfsScreen> {
   final StorageService storageService = StorageService();
 
+  final ShareService shareService = ShareService();
+
   List<File> pdfFiles = [];
 
   bool isLoading = true;
+  bool isExporting = false;
 
   @override
   void initState() {
     super.initState();
 
     _loadPdfs();
+  }
+
+  Future<void> _loadPdfs() async {
+    try {
+      final files = await storageService.getPdfFiles();
+
+      if (!mounted) return;
+
+      setState(() {
+        pdfFiles = files;
+        isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        isLoading = false;
+      });
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Failed to load PDFs: $e')));
+    }
+  }
+
+  Future<void> _openPdf(File file) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => PdfViewerScreen(file: file)),
+    );
+
+    if (!mounted) return;
+
+    await _loadPdfs();
+  }
+
+  Future<void> _sharePdf(File file) async {
+    try {
+      await shareService.sharePdf(file);
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Failed to share PDF: $e')));
+    }
+  }
+
+  Future<void> _exportPdf(File file) async {
+    if (isExporting) return;
+
+    try {
+      setState(() {
+        isExporting = true;
+      });
+
+      final savedUri = await storageService.exportPdf(file);
+
+      if (!mounted) return;
+
+      if (savedUri == null) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('PDF exported successfully')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Failed to export PDF: $e')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          isExporting = false;
+        });
+      }
+    }
   }
 
   Future<void> _renamePdf(File file) async {
@@ -140,28 +221,6 @@ class _MyPdfsScreenState extends State<MyPdfsScreen> {
     }
   }
 
-  Future<void> _loadPdfs() async {
-    try {
-      final files = await storageService.getPdfFiles();
-
-      if (!mounted) return;
-
-      setState(() {
-        pdfFiles = files;
-        isLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-
-      setState(() {
-        isLoading = false;
-      });
-
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Failed to load PDFs: $e')));
-    }
-  }
-
   String _getFileName(File file) {
     return file.path.split(Platform.pathSeparator).last;
   }
@@ -188,15 +247,6 @@ class _MyPdfsScreenState extends State<MyPdfsScreen> {
     final month = date.month.toString().padLeft(2, '0');
 
     return '$day/$month/${date.year}';
-  }
-
-  Future<void> _openPdf(File file) async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => PdfViewerScreen(file: file)),
-    );
-
-    await _loadPdfs();
   }
 
   @override
@@ -231,6 +281,12 @@ class _MyPdfsScreenState extends State<MyPdfsScreen> {
                     onTap: () {
                       _openPdf(file);
                     },
+                    onShare: () {
+                      _sharePdf(file);
+                    },
+                    onExport: () {
+                      _exportPdf(file);
+                    },
                     onRename: () {
                       _renamePdf(file);
                     },
@@ -251,6 +307,8 @@ class _PdfCard extends StatelessWidget {
   final String date;
 
   final VoidCallback onTap;
+  final VoidCallback onShare;
+  final VoidCallback onExport;
   final VoidCallback onRename;
   final VoidCallback onDelete;
 
@@ -259,6 +317,8 @@ class _PdfCard extends StatelessWidget {
     required this.fileSize,
     required this.date,
     required this.onTap,
+    required this.onShare,
+    required this.onExport,
     required this.onRename,
     required this.onDelete,
   });
@@ -331,16 +391,48 @@ class _PdfCard extends StatelessWidget {
                   color: AppColors.textSecondary,
                 ),
                 onSelected: (value) {
-                  if (value == 'rename') {
-                    onRename();
-                  }
+                  switch (value) {
+                    case 'share':
+                      onShare();
+                      break;
 
-                  if (value == 'delete') {
-                    onDelete();
+                    case 'export':
+                      onExport();
+                      break;
+
+                    case 'rename':
+                      onRename();
+                      break;
+
+                    case 'delete':
+                      onDelete();
+                      break;
                   }
                 },
                 itemBuilder: (context) {
                   return const [
+                    PopupMenuItem(
+                      value: 'share',
+                      child: Row(
+                        children: [
+                          Icon(Icons.share_outlined, size: 20),
+                          SizedBox(width: 12),
+                          Text('Share'),
+                        ],
+                      ),
+                    ),
+
+                    PopupMenuItem(
+                      value: 'export',
+                      child: Row(
+                        children: [
+                          Icon(Icons.download_outlined, size: 20),
+                          SizedBox(width: 12),
+                          Text('Export'),
+                        ],
+                      ),
+                    ),
+
                     PopupMenuItem(
                       value: 'rename',
                       child: Row(
@@ -351,6 +443,9 @@ class _PdfCard extends StatelessWidget {
                         ],
                       ),
                     ),
+
+                    PopupMenuDivider(),
+
                     PopupMenuItem(
                       value: 'delete',
                       child: Row(
