@@ -1,4 +1,4 @@
-package com.example.image_to_pdf
+package com.arion.imagetopdf
 
 import io.flutter.embedding.android.FlutterActivity
 
