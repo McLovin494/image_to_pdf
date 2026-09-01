@@ -13,7 +13,11 @@ class PdfService {
     required Directory directory,
     required String fileName,
   }) async {
-    var file = File('${directory.path}${Platform.pathSeparator}$fileName.pdf');
+    var file = File(
+      '${directory.path}'
+      '${Platform.pathSeparator}'
+      '$fileName.pdf',
+    );
 
     if (!await file.exists()) {
       return file;
@@ -55,7 +59,6 @@ class PdfService {
         throw Exception('Failed to decode image');
       }
 
-      // Prevent very large camera images from bloating the PDF.
       const maxDimension = 2400;
 
       if (decodedImage.width > maxDimension ||
@@ -75,7 +78,7 @@ class PdfService {
         }
       }
 
-      final quality = (imageQuality * 100).round().clamp(10, 100);
+      final quality = imageQuality.round().clamp(10, 100);
 
       final compressedBytes = img.encodeJpg(decodedImage, quality: quality);
 
@@ -135,10 +138,9 @@ class PdfService {
   }) {
     if (pageSize == PdfPageSize.fitImage) {
       double width = imageWidth.toDouble();
+
       double height = imageHeight.toDouble();
 
-      // 842pt is roughly the long edge of an A4 page.
-      // We use it only as a sensible maximum size.
       const maxPageDimension = 842.0;
 
       final largestDimension = width > height ? width : height;
@@ -148,18 +150,6 @@ class PdfService {
 
         width *= scale;
         height *= scale;
-      }
-
-      if (orientation == PdfOrientation.landscape && height > width) {
-        final temp = width;
-        width = height;
-        height = temp;
-      }
-
-      if (orientation == PdfOrientation.portrait && width > height) {
-        final temp = width;
-        width = height;
-        height = temp;
       }
 
       return PdfPageFormat(width, height, marginAll: 0);
